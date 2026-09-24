@@ -35,13 +35,13 @@ export async function POST(request: Request) {
   const ip = ipAllowed(clientIp(request));
   if (!ip.ok) {
     return NextResponse.json(
-      { error: `Easy there. You can start a few videos an hour; try again in ${Math.ceil(ip.retryAfterSeconds / 60)} min, or deploy the agent to your own account.` },
+      { error: `Easy there. You can start a few videos an hour; try again in ${Math.ceil(ip.retryAfterSeconds / 60)} min, or run the agent on your own account.`, limited: true },
       { status: 429, headers: { "retry-after": String(ip.retryAfterSeconds) } },
     );
   }
   const day = await dailyAllowed();
   if (!day.ok) {
-    return NextResponse.json({ error: "Today's free videos are all used up. Deploy the agent to your own OpenComputer account and it runs without limits." }, { status: 429 });
+    return NextResponse.json({ error: "Today's free videos are all used up. The agent is open source: deploy it to your own OpenComputer account and it runs on your own budget.", limited: true }, { status: 429 });
   }
   const jobId = newJobId();
   const session = await createSession();

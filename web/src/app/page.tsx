@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Examples } from "./examples";
 import { Technical } from "./technical";
 import { AfterVideo, Nav } from "./cta";
-import { DEPLOY_URL, DOCS_URL, REPO_URL } from "@/lib/links";
+import { DEPLOY_URL, DOCS, DOCS_URL, REPO_URL } from "@/lib/links";
+import { RunReceipt, RunTimeline, type Run } from "./run";
 
 type Mode = "url" | "prompt";
 type Job = { jobId: string; sessionId: string; mode: Mode; input: string; startedAt: number };
-type Poll = { status: "working" | "done" | "error"; phase?: string; videoUrl?: string; message?: string; note?: string };
+type Poll = { status: "working" | "done" | "error"; phase?: string; videoUrl?: string; message?: string; note?: string; run?: Run };
 
 const STORAGE = "launchvideo:job";
 const EXAMPLES: Record<Mode, string> = {
@@ -31,21 +32,22 @@ export default function Home() {
   const [job, setJob] = useState<Job | null>(null);
   const [poll, setPoll] = useState<Poll | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [limited, setLimited] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const timer = useRef<number | null>(null);
 
   useEffect(() => {
+    // Runs once on mount to restore a job from the URL or localStorage; the
+    // server render has no job, so this has to happen after hydration.
     // ?job=<id>&session=<sid> reopens a job started elsewhere (handy for sharing a link).
     const params = new URLSearchParams(window.location.search);
     const jobId = params.get("job");
     const sessionId = params.get("session");
-    if (jobId && sessionId) {
-      setJob({ jobId, sessionId, mode: "prompt", input: "", startedAt: Date.now() });
-      return;
-    }
     const saved = loadJob();
-    if (saved && Date.now() - saved.startedAt < 30 * 60 * 1000) setJob(saved);
+    const restored = jobId && sessionId ? { jobId, sessionId, mode: "prompt" as Mode, input: "", startedAt: Date.now() } : saved && Date.now() - saved.startedAt < 30 * 60 * 1000 ? saved : null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time rehydration after mount
+    if (restored) setJob(restored);
   }, []);
 
   useEffect(() => {
@@ -77,7 +79,8 @@ export default function Home() {
     setSubmitting(true);
     try {
       const res = await fetch("/api/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode, input }) });
-      const data = (await res.json()) as { jobId?: string; sessionId?: string; error?: string };
+      const data = (await res.json()) as { jobId?: string; sessionId?: string; error?: string; limited?: boolean };
+      setLimited(Boolean(data.limited));
       if (!res.ok || !data.jobId || !data.sessionId) throw new Error(data.error ?? "Could not start");
       const next: Job = { jobId: data.jobId, sessionId: data.sessionId, mode, input, startedAt: Date.now() };
       localStorage.setItem(STORAGE, JSON.stringify(next));
@@ -96,6 +99,7 @@ export default function Home() {
     setJob(null);
     setPoll(null);
     setError(null);
+    setLimited(false);
   };
 
   const working = job && (!poll || poll.status === "working");
@@ -112,6 +116,12 @@ export default function Home() {
           </h1>
           <p className="mt-5 text-lg text-muted max-w-xl">
             Paste a URL or describe the product. Opus 5.5 writes the film and a serverless agent renders it. About four minutes and roughly 100k tokens per video.
+          </p>
+          <p className="mt-3 text-sm text-muted">
+            Open source. The whole thing is one{" "}
+            <a href={DOCS.overview} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">OpenComputer agent</a>
+            {" "}and this page; <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">read the code</a> or{" "}
+            <a href={DEPLOY_URL} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">run your own copy</a>.
           </p>
         </header>
 
@@ -173,7 +183,17 @@ export default function Home() {
           </form>
         )}
 
-        {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+        {error && (
+          <div className="mt-4 rounded-xl border border-line p-4">
+            <p className="text-sm text-red-300">{error}</p>
+            {limited && (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <a href={DEPLOY_URL} target="_blank" rel="noreferrer" className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-white/90">Deploy your own copy</a>
+                <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-xs text-muted hover:text-foreground underline underline-offset-4">or read the code first</a>
+              </div>
+            )}
+          </div>
+        )}
 
         {working && (
           <section className="rounded-2xl border border-line p-6">
@@ -188,12 +208,10 @@ export default function Home() {
             <p className="mt-3 text-sm text-muted break-words">
               {job.mode === "url" ? job.input : job.input.slice(0, 160)}
             </p>
-            <p className="mt-6 text-xs text-muted">
+            <RunTimeline run={poll?.run} />
+            <p className="mt-4 text-xs text-muted">
               The agent reads the source, writes an HTML film, checks it, renders 30 frames a second in a headless browser, and uploads the MP4. You can leave this tab open.
-            </p>
-            <p className="mt-3 text-xs text-muted">
-              While you wait: the agent doing this is open source.{" "}
-              <a href={DEPLOY_URL} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">Deploy a copy to your OpenComputer account</a>.
+              The agent is open source: <a href={DEPLOY_URL} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">deploy a copy to your own account</a> while you wait.
             </p>
             <button onClick={reset} className="mt-4 text-xs text-muted hover:text-foreground">cancel and start over</button>
           </section>
@@ -210,6 +228,7 @@ export default function Home() {
               <button onClick={reset} className="ml-auto text-sm text-muted hover:text-foreground">make another</button>
             </div>
             {poll.note && <p className="mt-4 text-sm text-muted whitespace-pre-wrap">{poll.note.replace(poll.videoUrl ?? "", "").trim()}</p>}
+            <RunReceipt run={poll.run} wallSeconds={elapsed} />
             <AfterVideo />
           </section>
         )}
