@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSession, createTurn, endSession, waitForRuntime } from "@/lib/oc";
-import { jobText, newJobId, writeManifest, type Mode } from "@/lib/jobs";
+import { jobText, newJobId, type Mode } from "@/lib/jobs";
 import { clientIp, dailyAllowed, ipAllowed } from "@/lib/limits";
 
 export const runtime = "nodejs";
@@ -47,8 +47,7 @@ export async function POST(request: Request) {
   const session = await createSession();
   try {
     await waitForRuntime(session.id);
-    const manifestUrl = await writeManifest(jobId);
-    const text = jobText({ jobId, mode: job.mode, input: job.input, manifestUrl });
+    const text = jobText({ jobId, mode: job.mode, input: job.input });
     await createTurn(session.id, text, `job:${jobId}`);
   } catch (error) {
     await endSession(session.id);

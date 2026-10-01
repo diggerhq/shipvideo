@@ -189,7 +189,7 @@ export default function Home() {
               {job.mode === "url" ? job.input : job.input.slice(0, 160)}
             </p>
             <p className="mt-6 text-xs text-muted">
-              The agent reads the source, writes an HTML film, checks it, renders 30 frames a second in a headless browser, and uploads the MP4. You can leave this tab open.
+              The agent reads the source, writes an HTML film, checks it, renders 30 frames a second in a headless browser, and saves the MP4 to the session workspace. You can leave this tab open.
             </p>
             <p className="mt-3 text-xs text-muted">
               While you wait: the agent doing this is open source.{" "}
