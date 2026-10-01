@@ -44,13 +44,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Today's free videos are all used up. Deploy the agent to your own OpenComputer account and it runs without limits." }, { status: 429 });
   }
   const jobId = newJobId();
-  const session = await createSession();
+  let session: Awaited<ReturnType<typeof createSession>> | null = null;
   try {
+    session = await createSession();
     await waitForRuntime(session.id);
     const text = jobText({ jobId, mode: job.mode, input: job.input });
     await createTurn(session.id, text, `job:${jobId}`);
   } catch (error) {
-    await endSession(session.id);
+    if (session) await endSession(session.id);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not start the agent" }, { status: 502 });
   }
   return NextResponse.json({ jobId, sessionId: session.id });
