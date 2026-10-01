@@ -52,6 +52,25 @@ export function createTurn(sessionId: string, input: string, idempotencyKey: str
   });
 }
 
+export type WorkspaceDownload = { path: string; size: number; url: string; expiresAt: string; mediaType: string };
+
+// Authorizes a signed download of one file the agent wrote under /workspace.
+// Returns null while the file is not there yet (404 artifact_not_found).
+export async function workspaceDownload(sessionId: string, path: string): Promise<WorkspaceDownload | null> {
+  const res = await fetch(`${API}/api/managed-agents/sessions/${encodeURIComponent(sessionId)}/workspace/download`, {
+    method: "POST",
+    headers: { "x-api-key": key(), "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenComputer workspace download failed: ${res.status} ${body.slice(0, 300)}`);
+  }
+  return (await res.json()) as WorkspaceDownload;
+}
+
 export function endSession(sessionId: string) {
   return request(`/api/managed-agents/sessions/${encodeURIComponent(sessionId)}/end`, { method: "POST" }).catch(() => undefined);
 }

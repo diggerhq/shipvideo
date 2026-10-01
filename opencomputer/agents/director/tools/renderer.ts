@@ -11,9 +11,12 @@ import { join } from "node:path";
 //
 // The runtime is a fresh Amazon Linux 2023 arm64 microVM per session with
 // node 22, npm, curl, and dnf but no browser or ffmpeg, so the first call
-// installs them into ~/workspace/renderer (about a minute).
+// installs them into ~/.shipvideo on the local disk (about a minute). Only
+// the finished MP4 goes to /workspace, the session's shared workspace that
+// the OpenComputer files API can list and sign downloads for.
 
-export const WORK = join(homedir(), "workspace", "renderer");
+export const WORK = join(homedir(), ".shipvideo");
+export const WORKSPACE = "/workspace";
 const MARKER = join(WORK, ".ready");
 
 export const WIDTH = 1920;
@@ -49,7 +52,7 @@ export function bootstrap(progress?: (step: string) => void): Promise<void> {
     await mkdir(WORK, { recursive: true });
     progress?.("installing renderer (chromium + ffmpeg)");
     const [npm, libs] = await Promise.all([
-      run("npm init -y >/dev/null 2>&1; npm i playwright-core@1 ffmpeg-static @vercel/blob --no-audit --no-fund 2>&1 | tail -2 && npx playwright-core install chromium-headless-shell 2>&1 | tail -1", { timeoutMs: 600_000 }),
+      run("npm init -y >/dev/null 2>&1; npm i playwright-core@1 ffmpeg-static --no-audit --no-fund 2>&1 | tail -2 && npx playwright-core install chromium-headless-shell 2>&1 | tail -1", { timeoutMs: 600_000 }),
       run(`command -v dnf >/dev/null && dnf install -y -q ${SYSTEM_LIBS} >/dev/null 2>&1; echo dnf=$?`, { timeoutMs: 600_000 }),
     ]);
     if (npm.exitCode !== 0) throw new Error(`renderer install failed: ${npm.stdout.slice(-800)} ${npm.stderr.slice(-800)}`);
@@ -62,8 +65,8 @@ export function bootstrap(progress?: (step: string) => void): Promise<void> {
 }
 
 async function load<T = unknown>(pkg: string): Promise<T> {
-  // The renderer packages are CommonJS; require() them through the workspace's
-  // own resolution so subpath exports (@vercel/blob/client) work too.
+  // The renderer packages are CommonJS; require() them through the toolchain
+  // directory's own resolution so subpath exports work too.
   const { createRequire } = await import("node:module");
   const req = createRequire(join(WORK, "package.json"));
   const mod = req(pkg);
@@ -200,10 +203,4 @@ export async function renderMp4(input: {
   return { frames: total, renderMs: Date.now() - started, errors: scene.errors };
 }
 
-export async function uploadMp4(input: { path: string; pathname: string; token: string }) {
-  const { readFile } = await import("node:fs/promises");
-  const { put } = await load<{ put: (p: string, b: Buffer, o: Record<string, unknown>) => Promise<{ url: string; downloadUrl: string }> }>("@vercel/blob/client");
-  const body = await readFile(input.path);
-  const result = await put(input.pathname, body, { access: "public", token: input.token, contentType: "video/mp4", multipart: body.byteLength > 20_000_000 });
-  return { url: result.url, downloadUrl: result.downloadUrl, bytes: body.byteLength };
-}
+

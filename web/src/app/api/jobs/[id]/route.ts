@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { events, getSession } from "@/lib/oc";
-import { deleteManifest, findVideo } from "@/lib/jobs";
+import { events, getSession, workspaceDownload } from "@/lib/oc";
+import { videoPathFor } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 
@@ -18,9 +18,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const sessionId = new URL(request.url).searchParams.get("session") ?? "";
   if (!jobId || !sessionId) return NextResponse.json({ error: "missing job or session" }, { status: 400 });
 
-  const video = await findVideo(jobId);
+  const video = await workspaceDownload(sessionId, videoPathFor(jobId)).catch(() => null);
   if (video) {
-    await deleteManifest(jobId);
     return NextResponse.json({ status: "done" satisfies Status, phase: "Done", videoUrl: video.url, bytes: video.size });
   }
 
@@ -37,7 +36,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         phase = PHASES[tool] ?? phase;
         if (tool === "render_video") phase = "Rendering frames";
       }
-      if (event.type === "tool.completed" && String(event.data.tool ?? "") === "render_video") phase = "Uploading";
+      if (event.type === "tool.completed" && String(event.data.tool ?? "") === "render_video") phase = "Preparing the download";
       if (event.type === "tool.failed") phase = "Fixing a problem";
       if (event.type === "message.completed" && typeof event.data.text === "string") finalText = event.data.text;
       if (event.type === "turn.failed") {
@@ -49,9 +48,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         message = String(event.data.reason ?? "The agent runtime disconnected.");
       }
       if (event.type === "turn.completed") {
-        const again = await findVideo(jobId);
+        const again = await workspaceDownload(sessionId, videoPathFor(jobId));
         if (again) {
-          await deleteManifest(jobId);
           return NextResponse.json({ status: "done", phase: "Done", videoUrl: again.url, bytes: again.size, note: finalText });
         }
         status = "error";

@@ -8,12 +8,12 @@ import { webFetch } from "./tools/web.js";
 //   job_id: k3x9q2
 //   mode: url | prompt
 //   input: https://example.com  (or a free-text brief)
-//   job_manifest: https://<store>.public.blob.vercel-storage.com/jobs/k3x9q2.json
 //
-// The manifest holds the scoped upload token so the model never has to copy
-// it. Without a JOB block (playground, CLI) the agent still makes the video
-// and keeps the file in the runtime.
-type Job = { jobId: string | null; mode: "url" | "prompt"; input: string; manifestUrl: string | null };
+// render_video saves the MP4 to /workspace/videos/<job_id>.mp4, the session's
+// shared workspace; the frontend signs a download for it from the same job id.
+// Without a JOB block (playground, CLI) the agent still makes the video and
+// reports the workspace path.
+type Job = { jobId: string | null; mode: "url" | "prompt"; input: string };
 
 function parseJob(text: string): Job | null {
   if (!/^\s*JOB\s*$/m.test(text)) return null;
@@ -24,7 +24,6 @@ function parseJob(text: string): Job | null {
     jobId: field("job_id"),
     mode: field("mode") === "url" ? "url" : "prompt",
     input,
-    manifestUrl: field("job_manifest"),
   };
 }
 
@@ -64,8 +63,8 @@ PROCESS
 1. Understand the subject. In url mode, call web_fetch on the URL (and one more page such as /docs, /pricing, or /about if the home page is thin). Pull the product name, one-line value proposition, three concrete capabilities, any real numbers, and the brand colors and fonts reported in meta. In prompt mode, invent a tasteful name and palette if none is given, and never claim specific numbers.
 2. Write a shot list in your head: beat, seconds, on-screen words, visual. Then write the whole HTML.
 3. Call check_scene with the HTML and a few timestamps across the film. Fix every reported error and every beat whose visible text is wrong (leftover words from an earlier beat, a beat with nothing on screen). Iterate until it is clean.
-4. Call render_video once with the final HTML, the total duration, and jobId (and job_manifest as manifestUrl when present) copied exactly from the JOB block. The tool fetches the upload credentials itself.
-5. Reply with the video URL on its own line, then one sentence on what the video says. Nothing else. If the render fails twice, say what failed in plain words.
+4. Call render_video once with the final HTML, the total duration, and jobId copied exactly from the JOB block (or a short name of your choice when there is none).
+5. Reply with the workspace path of the video on its own line, then one sentence on what the video says. Nothing else. If the render fails twice, say what failed in plain words.
 
 You run unattended: never ask questions, make sensible choices, and finish.`;
 
@@ -76,14 +75,13 @@ JOB
 job_id: ${job.jobId ?? "none"}
 mode: ${job.mode}
 input: ${job.input}
-job_manifest: ${job.manifestUrl ?? "none"}
 
 Make the video now. ${job.mode === "url" ? "Start by fetching the URL." : "The input is the brief; follow it closely and fill gaps with taste."}`;
   }
 
   return `${craft}
 
-There is no JOB block, so there is no upload target: render_video will keep the MP4 in the runtime and report its path; say so in the reply.
+There is no JOB block, so pick a short jobId yourself; render_video saves the MP4 to the session workspace (/workspace) and reports its path.
 
 Request: ${text || "Make a 25-second launch video for a fictional inference startup."}`;
 }

@@ -1,9 +1,7 @@
-import { head, put } from "@vercel/blob";
-
 // Two cheap guards so a public form cannot run up the OpenComputer bill:
-// a per-IP limiter (per function instance; Fluid compute keeps instances warm
-// so it is meaningfully sticky) and a global daily cap kept as a tiny counter
-// in the Blob store (racy by design; it is a soft ceiling, not accounting).
+// a per-IP limiter and a global daily cap, both in-process (per function
+// instance; Fluid compute keeps instances warm so they are meaningfully
+// sticky, and racy by design — soft ceilings, not accounting).
 // The Vercel Firewall rate-limit rule on POST /api/jobs is the hard layer.
 
 const PER_IP_PER_HOUR = Number(process.env.JOBS_PER_IP_PER_HOUR ?? 3);
@@ -24,28 +22,15 @@ export function ipAllowed(ip: string): { ok: true } | { ok: false; retryAfterSec
   return { ok: true };
 }
 
-function dayKey(): string {
-  return `limits/${new Date().toISOString().slice(0, 10)}.json`;
-}
+const dayHits = new Map<string, number>();
 
-export async function dailyAllowed(): Promise<{ ok: true; used: number } | { ok: false; used: number }> {
-  let used = 0;
-  try {
-    const info = await head(dayKey());
-    const res = await fetch(info.url, { cache: "no-store", headers: { "cache-control": "no-cache" } });
-    used = Number(((await res.json()) as { used?: number }).used ?? 0);
-  } catch {
-    used = 0;
-  }
-  if (used >= PER_DAY) return { ok: false, used };
-  await put(dayKey(), JSON.stringify({ used: used + 1, updatedAt: new Date().toISOString() }), {
-    access: "public",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: "application/json",
-    cacheControlMaxAge: 60,
-  }).catch(() => undefined);
-  return { ok: true, used: used + 1 };
+export function dailyAllowed(): Promise<{ ok: true; used: number } | { ok: false; used: number }> {
+  const day = new Date().toISOString().slice(0, 10);
+  const used = dayHits.get(day) ?? 0;
+  if (used >= PER_DAY) return Promise.resolve({ ok: false, used });
+  dayHits.clear();
+  dayHits.set(day, used + 1);
+  return Promise.resolve({ ok: true, used: used + 1 });
 }
 
 export function clientIp(request: Request): string {

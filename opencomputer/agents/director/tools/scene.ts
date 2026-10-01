@@ -1,24 +1,14 @@
 import { defineTool } from "@opencomputer/agent";
-import { mkdir } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { HEIGHT, WIDTH, WORK, bootstrap, loadScene, renderMp4, uploadMp4 } from "./renderer.js";
+import { HEIGHT, WIDTH, WORK, WORKSPACE, bootstrap, loadScene, renderMp4 } from "./renderer.js";
 
 const MAX_SECONDS = 90;
 
-// The frontend stores {pathname, uploadToken} for each job as a small public
-// JSON file in the Blob store; the model only has to copy the 8-character job
-// id. BLOB_PUBLIC_BASE is a runtime variable, e.g.
-// https://<store>.public.blob.vercel-storage.com
-async function resolveUploadTarget(jobId: string, manifestUrl: string | null): Promise<{ pathname: string; token: string } | null> {
-  const base = process.env.BLOB_PUBLIC_BASE?.replace(/\/+$/, "");
-  const url = manifestUrl && /^https:\/\/[a-z0-9-]+\.public\.blob\.vercel-storage\.com\//.test(manifestUrl) ? manifestUrl : base ? `${base}/jobs/${jobId}.json` : null;
-  if (!url) return null;
-  const response = await fetch(url, { cache: "no-store", headers: { "cache-control": "no-cache" } });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Could not read the job manifest (${response.status}). Check job_id.`);
-  const manifest = (await response.json()) as { pathname?: unknown; uploadToken?: unknown };
-  if (typeof manifest.pathname !== "string" || typeof manifest.uploadToken !== "string") throw new Error("The job manifest is malformed.");
-  return { pathname: manifest.pathname, token: manifest.uploadToken };
+// Videos land under /workspace/videos so the session's workspace files API
+// (and the dashboard / `oc` CLI) can list them and sign a download URL.
+function videoWorkspacePath(jobId: string): string {
+  return `videos/${jobId}.mp4`;
 }
 
 function sceneHtml(input: Record<string, unknown>): string {
@@ -85,22 +75,21 @@ export const checkScene = defineTool({
 export const renderVideo = defineTool({
   name: "render_video",
   description:
-    `Render a scene (a complete HTML document, ${WIDTH}x${HEIGHT}) to an H.264 MP4 under the virtual clock and upload it to the job's storage. Takes about as long as the video is. Returns the public video URL. Call this once the scene passes check_scene.`,
+    `Render a scene (a complete HTML document, ${WIDTH}x${HEIGHT}) to an H.264 MP4 under the virtual clock and save it to the session workspace (/workspace). Takes about as long as the video is. Returns the workspace path. Call this once the scene passes check_scene.`,
   input: {
     type: "object",
     properties: {
       html: { type: "string", description: "The full HTML document." },
       durationSeconds: { type: "number", minimum: 3, maximum: MAX_SECONDS, description: "Total length of the video." },
       fps: { type: "integer", enum: [24, 30], description: "Default 30." },
-      jobId: { type: "string", description: "job_id from the JOB block." },
-      manifestUrl: { type: "string", description: "job_manifest from the JOB block, if present." },
+      jobId: { type: "string", description: "job_id from the JOB block; any short name works when there is none." },
     },
-    required: ["html", "durationSeconds", "jobId"],
+    required: ["html", "durationSeconds"],
     additionalProperties: false,
   },
   async run({ input, signal, reportProgress }) {
     const html = sceneHtml(input);
-    const jobId = String(input.jobId).replace(/[^a-zA-Z0-9_-]/g, "");
+    const jobId = String(input.jobId ?? "video").replace(/[^a-zA-Z0-9_-]/g, "");
     if (!jobId) throw new Error("jobId is required.");
     await bootstrap((step) => void reportProgress({ step }));
     const fps = input.fps === 24 ? 24 : 30;
@@ -116,25 +105,25 @@ export const renderVideo = defineTool({
       signal,
       onProgress: (frame, total) => void reportProgress({ step: `rendering ${frame}/${total}` }),
     });
-    const target = await resolveUploadTarget(jobId, typeof input.manifestUrl === "string" ? input.manifestUrl : null);
-    if (!target) {
-      const { stat } = await import("node:fs/promises");
-      const info = await stat(outPath);
-      return { url: null, downloadUrl: null, localPath: outPath, bytes: info.size, durationSeconds, fps, frames: rendered.frames, renderSeconds: Math.round(rendered.renderMs / 1000), errors: rendered.errors.slice(0, 20), note: "No upload target in this job; the file stayed in the runtime." };
-    }
-    await reportProgress({ step: "uploading" });
-    const uploaded = await uploadMp4({ path: outPath, pathname: target.pathname, token: target.token });
+    await reportProgress({ step: "saving to the workspace" });
+    // Render on local disk first, then publish the finished file in one copy
+    // so the workspace never shows a partial MP4.
+    const workspacePath = videoWorkspacePath(jobId);
+    const workspaceFile = join(WORKSPACE, workspacePath);
+    await mkdir(join(WORKSPACE, "videos"), { recursive: true });
+    await copyFile(outPath, workspaceFile);
+    const { stat } = await import("node:fs/promises");
+    const info = await stat(workspaceFile);
     return {
-      url: uploaded.url,
-      downloadUrl: uploaded.downloadUrl,
-      localPath: outPath,
-      bytes: uploaded.bytes,
+      path: workspacePath,
+      localPath: workspaceFile,
+      bytes: info.size,
       durationSeconds,
       fps,
       frames: rendered.frames,
       renderSeconds: Math.round(rendered.renderMs / 1000),
       errors: rendered.errors.slice(0, 20),
-      note: "Uploaded.",
+      note: `Saved to the session workspace at /workspace/${workspacePath}; download it from the session's workspace files.`,
     };
   },
 });

@@ -8,9 +8,4 @@ default_project_name = "shipvideo"
 
 [template.first_run]
 agent = "director"
-prompt = "Make a 25-second launch video for a fictional startup that does LLM inference. There is no upload target, so keep the MP4 in the runtime and report its path."
-
-[template.runtime_variables.BLOB_PUBLIC_BASE]
-description = "Optional. Public base URL of the Vercel Blob store the web app uploads job manifests to, e.g. https://<store>.public.blob.vercel-storage.com. Only needed when you run the web/ frontend."
-required = false
-example = "https://abc123.public.blob.vercel-storage.com"
+prompt = "Make a 25-second launch video for a fictional startup that does LLM inference. Save the MP4 to the session workspace and report its path."
